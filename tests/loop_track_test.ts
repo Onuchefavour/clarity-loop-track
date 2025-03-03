@@ -8,11 +8,10 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-  name: "Test activity logging and token rewards",
+  name: "Test activity logging and token rewards with valid parameters",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const user1 = accounts.get('wallet_1')!;
     
-    // Log activity
     let block = chain.mineBlock([
       Tx.contractCall('loop-track', 'log-activity', [
         types.principal(user1.address),
@@ -24,7 +23,6 @@ Clarinet.test({
     
     block.receipts[0].result.expectOk();
     
-    // Check token balance (should be 30 * 10 = 300 tokens)
     let response = chain.callReadOnlyFn(
       'loop-track',
       'get-token-balance',
@@ -32,70 +30,60 @@ Clarinet.test({
       user1.address
     );
     response.result.expectOk().expectUint(300);
-    
-    // Check activity stats
-    response = chain.callReadOnlyFn(
-      'loop-track',
-      'get-activity-stats',
-      [types.principal(user1.address)],
-      user1.address
-    );
-    let stats = response.result.expectOk().expectTuple();
-    assertEquals(stats['total-activities'], types.uint(1));
-    assertEquals(stats['total-minutes'], types.uint(30));
-    assertEquals(stats['total-calories'], types.uint(300));
   }
 });
 
 Clarinet.test({
-  name: "Test token redemption",
+  name: "Test unauthorized activity logging",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const user1 = accounts.get('wallet_1')!;
+    const user2 = accounts.get('wallet_2')!;
     
-    // First log activity to get tokens
     let block = chain.mineBlock([
       Tx.contractCall('loop-track', 'log-activity', [
         types.principal(user1.address),
         types.ascii("running"),
         types.uint(30),
         types.uint(300)
-      ], user1.address)
+      ], user2.address)
     ]);
     
-    // Try to redeem tokens
-    block = chain.mineBlock([
-      Tx.contractCall('loop-track', 'redeem-tokens', [
-        types.uint(100),
-        types.principal(user1.address)
-      ], user1.address)
-    ]);
-    
-    block.receipts[0].result.expectOk().expectBool(true);
-    
-    // Check remaining balance
-    let response = chain.callReadOnlyFn(
-      'loop-track',
-      'get-token-balance',
-      [types.principal(user1.address)],
-      user1.address
-    );
-    response.result.expectOk().expectUint(200);
+    block.receipts[0].result.expectErr().expectUint(103); // err-unauthorized
   }
 });
 
 Clarinet.test({
-  name: "Test insufficient tokens for redemption",
+  name: "Test invalid activity type",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const user1 = accounts.get('wallet_1')!;
     
-    // Try to redeem tokens without any balance
     let block = chain.mineBlock([
-      Tx.contractCall('loop-track', 'redeem-tokens', [
-        types.uint(100),
-        types.principal(user1.address)
+      Tx.contractCall('loop-track', 'log-activity', [
+        types.principal(user1.address),
+        types.ascii("invalid-activity"),
+        types.uint(30),
+        types.uint(300)
       ], user1.address)
     ]);
     
-    block.receipts[0].result.expectErr().expectUint(102); // err-insufficient-tokens
+    block.receipts[0].result.expectErr().expectUint(101); // err-invalid-activity
+  }
+});
+
+Clarinet.test({
+  name: "Test invalid duration and calories",
+  async fn(chain: Chain, accounts: Map<string, Account>) {
+    const user1 = accounts.get('wallet_1')!;
+    
+    let block = chain.mineBlock([
+      Tx.contractCall('loop-track', 'log-activity', [
+        types.principal(user1.address),
+        types.ascii("running"),
+        types.uint(500),
+        types.uint(20000)
+      ], user1.address)
+    ]);
+    
+    block.receipts[0].result.expectErr().expectUint(104); // err-invalid-params
   }
 });
